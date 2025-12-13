@@ -609,6 +609,12 @@ def _load_rtsp_dynamic_lib() -> CDLL:
     lib_rtsp_camera.camera_rtsp_register_raw_data.restype = c_int
     lib_rtsp_camera.camera_rtsp_unregister_raw_data.argtypes = [_RTSPCameraInstanceC, c_uint8]
     lib_rtsp_camera.camera_rtsp_unregister_raw_data.restype = c_int
+    try:
+        version_bytes: bytes = lib_rtsp_camera.camera_rtsp_version()
+        _LOGGER.info("libcamera_rtsp version: %s", version_bytes.decode("utf-8"))
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        _LOGGER.warning("failed to read libcamera_rtsp version: %s", exc)
+
     _LIB_CACHE = lib_rtsp_camera
     return lib_rtsp_camera
 
@@ -631,11 +637,6 @@ class RTSPCamera:
         self._log_handler = _RTSP_CAMERA_LOG_HANDLER(self._on_rtsp_camera_log)
         self._lib_rtsp_camera.camera_rtsp_set_log_handler(self._log_handler)
         self._lib_rtsp_camera.camera_rtsp_init()
-        try:
-            version_bytes: bytes = self._lib_rtsp_camera.camera_rtsp_version()
-            _LOGGER.info("libcamera_rtsp version: %s", version_bytes.decode("utf-8"))
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            _LOGGER.warning("failed to read libcamera_rtsp version: %s", exc)
 
     @property
     def lib_rtsp_camera(self) -> CDLL:
