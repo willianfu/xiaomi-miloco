@@ -15,13 +15,15 @@ from miot.client import MIoTClient
 from miot.types import MIoTOauthInfo, MIoTCameraInfo, MIoTCameraStatus, MIoTDeviceInfo, MIoTManualSceneInfo, MIoTUserInfo
 from miot.camera import MIoTCameraInstance
 from miot.rtsp_camera import RtspCameraInfo, RTSPCamera
+from miot.rtsp_server import RtspServer
 
-from miloco_server.config import MIOT_CACHE_DIR, CAMERA_CONFIG, RTSP_CAMERA_CONFIG
+from miloco_server.config import MIOT_CACHE_DIR, CAMERA_CONFIG, RTSP_CAMERA_CONFIG, RTSP_SERVER_CONFIG
 from miloco_server.dao.kv_dao import AuthConfigKeys, KVDao, DeviceInfoKeys
 from miloco_server.schema.miot_schema import CameraImgSeq
 from miloco_server.schema.rtsp_camera_schema import RtspCameraConfig
 from miloco_server.utils.carmera_vision_handler import (
     CameraVisionHandler,
+    RTSPEnabledCameraVisionHandler,
     RtspCameraVisionHandler,
     BaseCameraVisionHandler,
 )
@@ -64,6 +66,23 @@ class MiotProxy:
         self._camera_img_cache_ttl: int = max(1, int(self._frame_interval * self._camera_img_cache_max_size / 1000 * 2))
         self._camera_img_managers: dict[str, BaseCameraVisionHandler] = {}
         self._rtsp_camera_client: Optional[RTSPCamera] = None
+        
+        # Initialize RTSP Server
+        self._rtsp_server: Optional[RtspServer] = None
+        if RTSP_SERVER_CONFIG.get("enabled", True):
+            try:
+                rtsp_port = RTSP_SERVER_CONFIG.get("port", 8554)
+                self._rtsp_server = RtspServer(port=rtsp_port)
+                self._rtsp_server.start()
+                logger.info(
+                    "RTSP Server started on port %s ",
+                    rtsp_port
+                )
+            except Exception as e:
+                logger.error("Failed to start RTSP Server: %s", e)
+        else:
+            logger.info("RTSP Server is disabled in configuration")
+
         if self._rtsp_camera_configs:
             try:
                 self._rtsp_camera_client = RTSPCamera(frame_interval=self._frame_interval)
@@ -201,9 +220,18 @@ class MiotProxy:
         camera_instance = await self._get_camera_instance(camera_info)
         if camera_instance is not None:
             await camera_instance.start_async(enable_reconnect=True)
-            camera_img_manager = CameraVisionHandler(
-                camera_info, camera_instance, max_size=self._camera_img_cache_max_size, ttl=self._camera_img_cache_ttl
-            )
+
+            # Use RTSP-enabled handler if RTSP server is running
+            if self._rtsp_server:
+                camera_img_manager = RTSPEnabledCameraVisionHandler(
+                    camera_info, camera_instance, self._rtsp_server,
+                    max_size=self._camera_img_cache_max_size, ttl=self._camera_img_cache_ttl
+                )
+            else:
+                camera_img_manager = CameraVisionHandler(
+                    camera_info, camera_instance, max_size=self._camera_img_cache_max_size, ttl=self._camera_img_cache_ttl
+                )
+
             self._camera_img_managers[camera_info.did] = camera_img_manager
             return camera_img_manager
         else:
@@ -376,6 +404,9 @@ class MiotProxy:
                 continue
             await manager.destroy()
             del self._camera_img_managers[camera_did]
+            # Remove from RTSP server if exists
+            if self._rtsp_server:
+                self._rtsp_server.remove_stream(camera_did)
 
     async def _on_rtsp_status_changed(self, did: str, status: MIoTCameraStatus) -> None:
         """Sync RTSP status into cached info and handler."""

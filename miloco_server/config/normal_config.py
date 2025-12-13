@@ -106,6 +106,9 @@ CAMERA_CONFIG = {
     ),
 }
 
+# RTSP server configuration
+RTSP_SERVER_CONFIG = _config["camera"]["rtsp_server"]
+
 # RTSP camera configuration
 RTSP_CAMERA_CONFIG = _config.get("rtsp_cameras", [])
 
