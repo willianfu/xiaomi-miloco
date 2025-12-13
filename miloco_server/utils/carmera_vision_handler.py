@@ -190,6 +190,114 @@ class CameraVisionHandler(BaseCameraVisionHandler):
 
         await self.miot_camera_instance.destroy_async()
 
+class RTSPEnabledCameraVisionHandler(CameraVisionHandler):
+    """Camera vision handler that also forwards video to RTSP server."""
+
+    def __init__(self, camera_info: MIoTCameraInfo, miot_camera_instance: MIoTCameraInstance,
+                 rtsp_server, max_size: int, ttl: int):
+        # Store RTSP server reference
+        self._rtsp_server = rtsp_server
+        # Track registered callbacks
+        self._stream_reg_ids: dict[int, int] = {}
+        # Track detected codecs
+        self._detected_video_codec = 0
+        self._detected_audio_codec = 0
+        self._stream_added = False
+
+        # Call parent constructor
+        super().__init__(camera_info, miot_camera_instance, max_size, ttl)
+
+        # Register raw video stream to forward to RTSP
+        asyncio.create_task(self._register_rtsp_forwarding())
+
+    async def _register_rtsp_forwarding(self):
+        """Register a callback to forward video frames to RTSP server."""
+        async def on_video(did: str, data: bytes, ts: int, seq: int, channel: int):
+            # Detect video codec from data
+            codec_id = self._detect_codec_from_data(data)
+            if codec_id in [4, 5]:  # Video codecs
+                if self._detected_video_codec == 0:
+                    self._detected_video_codec = codec_id
+                    logger.info("Detected video codec: %s for %s",
+                              "H264" if codec_id == 4 else "H265", did)
+
+                # Add RTSP stream if not added yet
+                if not self._stream_added:
+                    self._stream_added = True
+                    # Default to G711A for audio if not detected
+                    audio_codec = self._detected_audio_codec if self._detected_audio_codec > 0 else 1027
+
+                    if self._rtsp_server.add_stream(did, self._detected_video_codec, audio_codec):
+                        logger.info("RTSP stream added for %s (video: %s, audio: %s)",
+                                  did,
+                                  "H264" if self._detected_video_codec == 4 else "H265",
+                                  {1026: "G711U", 1027: "G711A", 1032: "OPUS"}[audio_codec])
+                    else:
+                        logger.warning("Failed to add RTSP stream for %s", did)
+                        return
+
+                # Forward video frame to RTSP server
+                if self._rtsp_server:
+                    frame_type = 1 if self._is_i_frame(data) else 0
+                    self._rtsp_server.push_frame(did, self._detected_video_codec, data, ts, seq, frame_type)
+
+        async def on_audio(did: str, data: bytes, ts: int, seq: int, channel: int):
+            # Audio is harder to detect from data, assume common codec
+            if self._detected_audio_codec == 0:
+                # Default to G711A for Xiaomi cameras
+                self._detected_audio_codec = 1027
+                logger.info("Using default audio codec: G711A for %s", did)
+
+        # Register video callback
+        self._rtsp_reg_id = await self.miot_camera_instance.register_raw_video_async(on_video, multi_reg=True)
+        # Register audio callback
+        self._rtsp_audio_reg_id = await self.miot_camera_instance.register_raw_audio_async(on_audio, multi_reg=True)
+
+        logger.info("RTSP forwarding enabled for %s", self.camera_info.did)
+
+    def _detect_codec_from_data(self, data: bytes) -> int:
+        """Detect codec ID from raw frame data."""
+        if not data or len(data) < 5:
+            return 0
+
+        # Check for NAL unit start code
+        if data[0] == 0x00 and data[1] == 0x00 and data[2] == 0x00 and data[3] == 0x01:
+            nal_type = data[4] & 0x1F
+            # H.264 NAL types range from 1-23 for single NAL units
+            if 1 <= nal_type <= 23:
+                return 4  # H.264
+            else:
+                return 5  # H.265 (simplified detection)
+
+        # Audio codecs are harder to detect from raw data, return 0
+        return 0
+
+    def _is_i_frame(self, data: bytes) -> bool:
+        """Check if frame is an I-frame based on NAL unit type."""
+        if not data or len(data) < 5:
+            return False
+
+        if data[0] == 0x00 and data[1] == 0x00 and data[2] == 0x00 and data[3] == 0x01:
+            nal_type = data[4] & 0x1F
+            # I-frame NAL types: 5 (IDR), 7 (SPS), 8 (PPS) for H.264
+            if nal_type in [5, 7, 8]:
+                return True
+        return False
+
+    async def register_raw_stream(self, callback: Callable[[str, bytes, int, int, int], Coroutine], channel: int):
+        # Use multi_reg=True to not override RTSP callback
+        reg_id = await self.miot_camera_instance.register_raw_video_async(callback, channel, multi_reg=True)
+        self._stream_reg_ids[channel] = reg_id
+        return reg_id
+
+    async def unregister_raw_stream(self, channel: int):
+        # Only unregister the stream callback, not the RTSP callback
+        if channel in self._stream_reg_ids:
+            reg_id = self._stream_reg_ids[channel]
+            await self.miot_camera_instance.unregister_raw_video_async(channel, reg_id)
+            del self._stream_reg_ids[channel]
+            logger.info("Unregistered stream callback for channel %s, RTSP continues", channel)
+
 
 class RtspCameraVisionHandler(BaseCameraVisionHandler):
     """RTSP camera vision handler using libcamera_rtsp."""

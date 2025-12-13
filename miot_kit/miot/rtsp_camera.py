@@ -46,6 +46,7 @@ _RTSP_CAMERA_LOG_HANDLER = CFUNCTYPE(None, c_int, c_char_p)
 # camera pointer, status
 _RTSP_CAMERA_ON_STATUS_CHANGED = CFUNCTYPE(None, c_int)
 
+_LIB_CACHE: Optional[CDLL] = None
 
 class RtspCameraInfo(BaseModel):
     """RTSP camera information and runtime state."""
@@ -538,6 +539,10 @@ class RTSPCameraInstance:
 
 
 def _load_rtsp_dynamic_lib() -> CDLL:
+    global _LIB_CACHE
+    if _LIB_CACHE is not None:
+        return _LIB_CACHE
+
     system = platform.system().lower()
     machine = platform.machine().lower()
     lib_path = Path(__file__).parent / "libs"
@@ -604,6 +609,7 @@ def _load_rtsp_dynamic_lib() -> CDLL:
     lib_rtsp_camera.camera_rtsp_register_raw_data.restype = c_int
     lib_rtsp_camera.camera_rtsp_unregister_raw_data.argtypes = [_RTSPCameraInstanceC, c_uint8]
     lib_rtsp_camera.camera_rtsp_unregister_raw_data.restype = c_int
+    _LIB_CACHE = lib_rtsp_camera
     return lib_rtsp_camera
 
 
