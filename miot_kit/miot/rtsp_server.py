@@ -8,7 +8,6 @@ Wraps the libcamera_rtsp library to provide an RTSP server.
 from __future__ import annotations
 
 import logging
-import platform
 from ctypes import (
     CDLL,
     CFUNCTYPE,
@@ -22,8 +21,6 @@ from ctypes import (
     c_void_p,
     byref,
 )
-from pathlib import Path
-from typing import Optional
 
 from .rtsp_camera import _load_rtsp_dynamic_lib as _load_lib_base
 
@@ -84,7 +81,8 @@ def _load_rtsp_dynamic_lib() -> CDLL:
         lib.rtsp_server_stop.argtypes = [_RTSPServerInstanceC]
         lib.rtsp_server_stop.restype = None
 
-        # int rtsp_server_add_stream(rtsp_server_handle handle, const char* url_suffix, uint32_t video_codec_id, uint32_t audio_codec_id);
+        # int rtsp_server_add_stream(rtsp_server_handle handle, const char* url_suffix,
+        #                            uint32_t video_codec_id, uint32_t audio_codec_id);
         lib.rtsp_server_add_stream.argtypes = [_RTSPServerInstanceC, c_char_p, c_uint32, c_uint32]
         lib.rtsp_server_add_stream.restype = c_int
 
@@ -92,8 +90,14 @@ def _load_rtsp_dynamic_lib() -> CDLL:
         lib.rtsp_server_remove_stream.argtypes = [_RTSPServerInstanceC, c_char_p]
         lib.rtsp_server_remove_stream.restype = c_int
 
-        # int rtsp_server_push_frame(rtsp_server_handle handle, const char* url_suffix, const struct rtsp_frame_header* header, const uint8_t* data);
-        lib.rtsp_server_push_frame.argtypes = [_RTSPServerInstanceC, c_char_p, POINTER(_RTSPServerFrameHeaderC), POINTER(c_uint8)]
+        # int rtsp_server_push_frame(rtsp_server_handle handle, const char* url_suffix,
+        #                            const struct rtsp_frame_header* header, const uint8_t* data);
+        lib.rtsp_server_push_frame.argtypes = [
+            _RTSPServerInstanceC,
+            c_char_p,
+            POINTER(_RTSPServerFrameHeaderC),
+            POINTER(c_uint8)
+        ]
         lib.rtsp_server_push_frame.restype = c_int
 
         # void rtsp_server_set_log_handler(rtsp_log_handler_t handler);
@@ -107,7 +111,7 @@ def _load_rtsp_dynamic_lib() -> CDLL:
 
 class RtspServer:
     """RTSP Server."""
-    
+
     _lib: CDLL
     _handle: _RTSPServerInstanceC
     _log_handler: _RTSP_SERVER_LOG_HANDLER
@@ -169,23 +173,31 @@ class RtspServer:
         )
         return ret == 0
 
-    def push_frame(self, url_suffix: str, codec_id: int, data: bytes, timestamp: int, sequence: int, frame_type: int) -> bool:
+    def push_frame(
+        self,
+        url_suffix: str,
+        codec_id: int,
+        data: bytes,
+        timestamp: int,
+        sequence: int,
+        frame_type: int
+    ) -> bool:
         """Push a frame to the stream."""
         if not self._handle:
             return False
-            
+
         header = _RTSPServerFrameHeaderC()
         header.codec_id = codec_id
         header.length = len(data)
         header.timestamp = timestamp
         header.sequence = sequence
         header.frame_type = frame_type
-        header.channel = 0 
-        
+        header.channel = 0
+
         # ctypes.cast to void pointer or similar might be safer for bytes
         # but from_buffer_copy is standard.
         c_data = (c_uint8 * len(data)).from_buffer_copy(data)
-        
+
         ret = self._lib.rtsp_server_push_frame(
             self._handle,
             url_suffix.encode("utf-8"),
@@ -194,5 +206,5 @@ class RtspServer:
         )
         return ret == 0
 
-    def _on_log(self, level: int, msg: bytes):
+    def _on_log(self, level: int, msg: bytes):  # pylint: disable=unused-argument
         _LOGGER.info("[Native RTSP Server] %s", msg.decode("utf-8"))
