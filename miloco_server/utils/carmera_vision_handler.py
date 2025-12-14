@@ -212,7 +212,7 @@ class RTSPEnabledCameraVisionHandler(CameraVisionHandler):
 
     async def _register_rtsp_forwarding(self):
         """Register a callback to forward video frames to RTSP server."""
-        async def on_video(did: str, data: bytes, ts: int, seq: int, channel: int):
+        async def on_video(did: str, data: bytes, ts: int, seq: int, channel: int):  # pylint: disable=unused-argument
             # Detect video codec from data
             codec_id = self._detect_codec_from_data(data)
             if codec_id in [4, 5]:  # Video codecs
@@ -241,7 +241,7 @@ class RTSPEnabledCameraVisionHandler(CameraVisionHandler):
                     frame_type = 1 if self._is_i_frame(data) else 0
                     self._rtsp_server.push_frame(did, self._detected_video_codec, data, ts, seq, frame_type)
 
-        async def on_audio(did: str, data: bytes, ts: int, seq: int, channel: int):
+        async def on_audio(did: str, data: bytes, ts: int, seq: int, channel: int):  # pylint: disable=unused-argument
             # Audio is harder to detect from data, assume common codec
             if self._detected_audio_codec == 0:
                 # Default to G711A for Xiaomi cameras

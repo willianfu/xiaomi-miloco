@@ -66,7 +66,7 @@ class MiotProxy:
         self._camera_img_cache_ttl: int = max(1, int(self._frame_interval * self._camera_img_cache_max_size / 1000 * 2))
         self._camera_img_managers: dict[str, BaseCameraVisionHandler] = {}
         self._rtsp_camera_client: Optional[RTSPCamera] = None
-        
+
         # Initialize RTSP Server
         self._rtsp_server: Optional[RtspServer] = None
         if RTSP_SERVER_CONFIG.get("enabled", True):
@@ -78,7 +78,7 @@ class MiotProxy:
                     "RTSP Server started on port %s ",
                     rtsp_port
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error("Failed to start RTSP Server: %s", e)
         else:
             logger.info("RTSP Server is disabled in configuration")
@@ -229,7 +229,10 @@ class MiotProxy:
                 )
             else:
                 camera_img_manager = CameraVisionHandler(
-                    camera_info, camera_instance, max_size=self._camera_img_cache_max_size, ttl=self._camera_img_cache_ttl
+                    camera_info,
+                    camera_instance,
+                    max_size=self._camera_img_cache_max_size,
+                    ttl=self._camera_img_cache_ttl
                 )
 
             self._camera_img_managers[camera_info.did] = camera_img_manager
